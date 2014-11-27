@@ -445,7 +445,6 @@ def watchJob(pid):
     if output=="Traceback (most recent call last):\n":
       traceBack=output
     if not output:
-      print 'output empty'
       break
     if not args.longoutput:
       sys.stdout.write(string.replace(output,'\n','\r'))

@@ -169,8 +169,8 @@ On the client, move to the example directory and start PROA.
 cd <PROAPATH>/examples/simple
 proa.py
 
-On the right side is a combo box. Instead of the preselected "default",
-choose "data".
+On the right side beneath the button labeled "Reset",is a combo box.
+Instead of the preselected "default", choose "data".
 
 Press "Reset". This executes the code in the upper box. It will scan you data directory
 for jobs, sort and filter them, select a subset of those found and load the
@@ -195,6 +195,16 @@ But what if you want to check a whole range of parameters? Starting jobs manuall
 is tedious.
 
 Introducing sequences:
+
+The "runjob.py" command can provide a sequence argument to the job script.
+The script needs to read that command line switch and interpret it
+in some meaningful way. An easy way to do that is through the getInput()
+call provided in the "jobhelper.py" script. To allow this to work, the
+PROA scripts need to be made available to python via the python path
+setting. You can either configure this manually or use the facility provided
+by adding '<PROAPATH>/proa' to the path list "pythonPath in "proaconfig.py"
+(Remember to copy the file to the master node as well.
+
 
 Move to the other example directory:
 
@@ -222,3 +232,24 @@ This is all for the tutorial for now.
 
 Have fun.
 
+
+Part4: Tips and Tricks
+-----
+
+Use the --redo parameter to "runplot.py" to rerun a job that has failed.
+
+Keyboard shortcuts in PROA:
+
+Ctrl+Shift+Enter = Reset
+Ctrl+Enter = Plot
+
+Alt+Left/Right = Change the analysis set (like changing the combobox)
+
+Alt+Up/Down = Cycle between the reset and plot command boxes and the spin controls.
+
+
+In order to create a new analysis set, select the one you want to base this on
+(e.g. the empty "default" set) and type a new name in the combobox and hit "Enter".
+A copy will be created under that new name.
+
+All changes are saved automatically.
