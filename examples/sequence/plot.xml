@@ -1,0 +1,17 @@
+<allsets><dataServer use="True" /><plotset name="default"><reset>print &gt;&gt;gnuplot,'reset'</reset><plot>print &gt;&gt;gnuplot,'plot x'</plot><sc>0</sc><sc>0</sc><sc>0</sc><sc>0</sc></plotset><geometry height="556" width="1132" x="2124" y="445" /><plotset name="data"><reset>allJobs=findjobs.gimmeAll()
+allJobs=findjobs.applyFilters(allJobs,[\
+	[lambda x:not 'sequence' in x['meta']],\
+#	[lambda x:float(x['params']['q'])&lt;=-0.5,'q'],\
+])
+dnum=range(5)
+allJobs.sort(key=lambda x:x['meta']['time'],reverse=True)
+extra['metas'],extra['params'],ukeys=findjobs.printJobs(allJobs,dnum)
+data['data']=[]
+for job in extra['metas']:
+	try:
+		data['data'].append(findjobs.openFile(job,'datafile',['J ','J E'],['J E'],['J']))
+	except IOError:
+		pass</reset><plot>plot.emptyStore()
+for ind,dat in enumerate(data['data']):
+	plot.storePlot('u 1:{} w lp title "{}-{}"'.format(['2','3','($2**2+$3**2)'][s[2]],extra['metas'][ind].get('desc',''),extra['metas'][ind].get('seqind','')),dat[s[0]])
+plot.runPlots()</plot><sc>0</sc><sc>0</sc><sc>2</sc><sc>0</sc></plotset><gplGeometry height="824" width="640" x="1440" y="52" /></allsets>

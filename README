@@ -1,0 +1,224 @@
+This is PROA : Python research organization and analysis
+
+It is a suite for managing computational research output.
+If you know python and if you routinely run many compute jobs
+that produce data that needs to be aggregated, this is for you!
+
+It consists of two parts:
+1. Submit and organize jobs. This can be coupled to
+   an existing job/processor management system or run
+   on its own.
+
+2. Analysis and display. This is used to wade through large
+   numbers of jobs that have been run in the past, find 
+   those that are of current interest and analyze and
+   display the output data contained in them.
+
+Those two parts can be used fairly independently.
+
+
+Part 1: How yo keep your jobs in order!
+-------
+
+The job submission system assumes the following layout of
+your compute infrastructure:
+
+Client: A computer that you work on. This should contain
+        your input files.
+
+Master: A computer that you can SSH login to.
+
+Slaves: A set of nodes that share a common file system
+        with the master node. These will be used to
+        perform the actual computation. They need to
+        be controlled either via a process queueing
+        system or be reachable via SSH from the master node.
+
+In the simplest installation, all three of these can be the
+same physical machine. Or there can be many slaves connected to
+a separate login node. There can also be many master nodes each
+with their own set of slave nodes.
+
+For the purpose of this introduction, I will presume there is
+one node each and a SSH link from the master node to the slave
+node.
+
+Prerequisites:
+-------------
+
+python 2
+bash
+readline support (optional)
+Some familiarity with python.
+
+Installation:
+-------------
+
+Do the following three steps on both, the client and the master:
+
+Create a directory. 
+
+client:
+mkdir <PROAPATH>
+
+Clone the git repository into the main directory.
+
+cd <PROAPATH>
+git clone https://github.com/cobbystreet/proa
+
+Add <PROAPATH>/proa to your PATH environment variable. Edit ${HOME}/.bashrc
+and put the following line somewhere towards the end:
+
+export PATH=<PROAPATH>/proa:$PATH
+
+
+
+On the master add two more directories
+mkdir <PROAPATH>/data
+mkdir <PROAPATH>/data/support
+
+
+PROA expects a configuration python script named "proaconfig.py" in the
+ PROA directory. Copy the provided <PROAPATH>/proa/exampleconfig.py to
+<PROAPATH>/proa/proaconfig.py and edit it.
+
+There is one thing you HAVE to configure, the login info of the master node.
+Find the variable called "login". It is a dictionary that contains the 
+host name of the master as the key, and a few configuration variables
+in a nested dictionary as values. Change the key 'localhost' to the name
+of your master node. Change the value of 'baseDir' to whatever you
+chose for <PROAPATH>/data above. While you are at it, change the value of
+'IP' to the address (or host name) of the master node. You won't need that
+for now, but if you indend to use the data aggregation and analysis part 
+as well, you might just configure this now.
+
+When you are done, remove the 
+raise ValueError(...)
+above, save and copy the file to the master node. The client and the master
+need to have the same configuration file.
+
+That's it. You are done with the setup. There are, of course, plenty of
+things you can tune, but this should get you started.
+
+Usage:
+------
+
+On the client, go to the example directory.
+
+cd <PROAPATH>/proa/examples/simple
+
+The example directory contains a python script "freespace.py" that
+computes the free space time evolution of a Gaussian shaped quantum wave
+packet. It makes use of an auxiliary file "function.py" and reads its
+parameters from "params.py".
+
+The following command starts this script on the slave node "slave" 
+through logging in to the login node "master". Dependencies as configured
+in the file "proaconfig.xml" are copied to the login node along with
+the script and parameters. A job directory will be created and the data
+run 
+
+Start the job:
+
+runjob.py --jobtype freespace -i params.py --cmd "./freespace.py params.py"  -l master --nodearg slave
+
+While the job is running, "runjob.py" asks you to enter a one line
+description from which you might later tell what this is all about. Enter
+something. Maybe "first run".
+
+Before we delve into changing parameters and such, lets proceed to Part 2 of
+this introduction to look at the results.
+
+
+
+
+Part 2: How to make sense of your data!
+-------
+
+Once you have run hundreds of jobs, it can be difficult to find the one
+you are looking for. But pruning your output data regularly to keep
+things orderly might loose something that is found later to be important.
+
+The analysis part of PROA lets you quickly identify certain jobs and display
+differences and similarities.
+
+Prerequisites:
+--------------
+
+wxPython
+gnuplot
+
+Installation:
+-------------
+
+I will assume here that you are using the analysis part in conjunction
+with the job management described in part 1. I can be used without, but
+I won't cover that case for now. Thus I will presume you have installed
+PROA as above. The only additional step you need to take for analysis
+is to start the dataServer on the master node.
+
+cd <PROAPATH>/data/support
+nohup dataserver.py master &
+
+
+Usage:
+------
+
+On the client, move to the example directory and start PROA.
+
+cd <PROAPATH>/examples/simple
+proa.py
+
+On the right side is a combo box. Instead of the preselected "default",
+choose "data".
+
+Press "Reset". This executes the code in the upper box. It will scan you data directory
+for jobs, sort and filter them, select a subset of those found and load the
+data.
+
+Press "Plot". This executes the code in the lower box. It will create graphs for
+each data file previously loaded. You should now see a gnuplot window open.
+Change the python code to do something interesting or click on the first
+spin box at the lower border of the window to change the index viewed
+
+
+
+Part 3: How to automate things!
+-------
+
+You can now submit jobs and analyze their results. If you change parameters in
+the "params.py" file, this will change the output. Go ahead and try it. For instance
+change the parameter "p" in "params.py" and see how the wave packet moves faster
+or slower.
+
+But what if you want to check a whole range of parameters? Starting jobs manually
+is tedious.
+
+Introducing sequences:
+
+Move to the other example directory:
+
+cd <PROAPATH>/proa/examples/sequence
+
+The example here is the same as above, but preconfigured to run a sequence of
+jobs with varying momentum "p".
+
+First get a preview of the sequence:
+
+runjob.py --jobtype freespace -i params.py --cmd "./freespace.py params.py"  -l master --nodearg slave --seqpreview
+
+This will tell you, that "runjob.py" found five different settings. Now execute
+this sequence.
+
+runjob.py --jobtype freespace -i params.py --cmd "./freespace.py params.py"  -l master --nodearg slave --seqname "momentum scan" --sequence 5
+
+You won't be asked for a description here, but you may supply a fixed name. You
+also need to specify how many jobs should be run. Since the preview showed
+five possible values, specify that.
+
+Once this is complete, start the analysis tool and look at the results.
+
+This is all for the tutorial for now.
+
+Have fun.
+

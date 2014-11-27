@@ -1,0 +1,13 @@
+<proaconfig>
+  <command name="sum" out="sumout" depends="datafile">awk '{a=a+$3}END{print a}' datafile >sum</command>
+  <jobtype name="freespace" inputtype='python'>
+    <success filename="stdout">finished</success>
+    <support filename="function.py"/>
+    <variable name="xmin"/>
+    <variable name="xmax"/>
+    <variable name="p"/>
+    <variable name="q"/>
+    <variable name="sig"/>
+    <variable name="m"/>
+  </jobtype>
+</proaconfig>

@@ -1,0 +1,28 @@
+<allsets><dataServer use="True" /><plotset name="default"><reset>print &gt;&gt;gnuplot,'reset'</reset><plot>print &gt;&gt;gnuplot,'plot x'</plot><sc>0</sc><sc>0</sc><sc>0</sc><sc>0</sc></plotset><geometry height="556" width="1132" x="2124" y="445" /><plotset name="data"><reset>#do not write in line number 1!!!
+
+#load all jobs
+allJobs=findjobs.gimmeAll()
+#filter according to some parameter
+allJobs=findjobs.applyFilters(allJobs,[\
+	[lambda x:float(x['params']['q'])&gt;=-0.5,'q'],\
+])
+#sort according to start time
+allJobs.sort(key=lambda x:x['meta']['time'],reverse=True)
+#select the first five jobs found
+dnum=range(5)
+extra['metas'],extra['params'],ukeys=findjobs.printJobs(allJobs,dnum)
+
+#load data
+data['data']=[]
+for job in extra['metas']:
+	try:
+		data['data'].append(findjobs.openFile(job,'datafile',['J ','J E'],['J E'],['J']))
+	except IOError:
+		pass</reset><plot>#do not write in line number 1!!!
+#remove all plots from last round
+plot.emptyStore()
+#create a plot for each data file
+for ind,dat in enumerate(data['data']):
+	plot.storePlot('u 1:{} w lp title "{}"'.format(['2','3','($2**2+$3**2)'][s[2]],extra['metas'][ind].get('desc','')),dat[s[0]])
+#run
+plot.runPlots()</plot><sc>0</sc><sc>0</sc><sc>2</sc><sc>0</sc></plotset><gplGeometry height="876" width="640" x="1440" y="52" /></allsets>
