@@ -90,6 +90,8 @@ class proa(wx.Frame):
     self.reset = PythonSTC(panel,-13)
     self.reset.SetText(u"\n"*string.count(config.resetPrefix,"\n")\
                        +"\nprint >>gnuplot,'reset'")
+    self.reset.SetUseTabs(False)
+    self.reset.SetTabWidth(2)
     self.reset.HideLines(0,string.count(config.resetPrefix,"\n"))
     sizer.Add(self.reset,(0,0),(resetHeight,self.maxSC),wx.EXPAND)
     self.reset.Bind(wx.EVT_CHAR, self.OnKey)
@@ -109,6 +111,8 @@ class proa(wx.Frame):
     self.plot = PythonSTC(panel,-1)
     self.plot.SetText(u"\n"*string.count(config.plotPrefix,"\n")+\
                       "\nprint >>gnuplot,'plot x'")
+    self.plot.SetUseTabs(False)
+    self.plot.SetTabWidth(2)
     self.plot.HideLines(0,string.count(config.plotPrefix,"\n"))
     sizer.Add(self.plot,(resetHeight,0),(plotHeight,self.maxSC),wx.EXPAND)
     self.plot.Bind(wx.EVT_CHAR, self.OnKey)
@@ -207,7 +211,12 @@ class proa(wx.Frame):
     self.scs[0].SetRange(0,a)
 
   def OnExit(self,event):
+    if (self.myreset!=None) and (self.myreset.running):
+      self.myreset.stop()
     plot.emptyStore()
+
+    self.saveSet()
+
     gplGeometry=plot.doRaise(config.gplID)
     if (gplGeometry!=None):
       geometry=self.plotsets.find("gplGeometry")
@@ -251,6 +260,13 @@ class proa(wx.Frame):
       # or create a new one otherwise
       a=ET.SubElement(self.plotsets.getroot(),"plotset")
       a.set("name",self.actPS)
+
+    # try to save cursor position
+    cursorPos=a.find('cursor')
+    if cursorPos==None:
+      cursorPos=ET.SubElement(a,"cursor")
+    cursorPos.set('reset',str(self.reset.GetCurrentPos()))
+    cursorPos.set('plot',str(self.plot.GetCurrentPos()))
 
     # try to save value of "reset" text
     rText=a.find("reset")
@@ -312,10 +328,17 @@ class proa(wx.Frame):
           self.scs[i].SetValue(int(spins[i].text))
         else:
           self.scs[i].SetValue(0)
+      cursorPos=a.find('cursor')
+      if cursorPos!=None:
+        self.reset.GotoPos(int(cursorPos.attrib['reset']))
+        self.plot.GotoPos(int(cursorPos.attrib['plot']))
+
+    # restore previously saved data
     try:
       self.data=self.alldata[self.actPS]
     except Exception as inst:
       self.data={}
+    # restore previously saved plot storage
     try:
       self.mystore=self.allstores[self.actPS]
     except Exception as inst:
@@ -404,12 +427,17 @@ class proa(wx.Frame):
 
   def OnPressRestart(self,event):
     import dataserver
-    try:
-      dataserver.makeRequest(config.serverIP,('r',))
-    except EOFError:
-      # of course the connection will drop if we restart
-      pass
-
+    for server in config.login:
+      try:
+        dataserver.makeRequest(config.login[server]['IP'],config.login[server]['port'],\
+                               ('r',))
+      except EOFError:
+        # of course the connection will drop if we restart
+        pass
+      except IOError:
+        print >>sys.stderr,'dataServer "{}" ({}) is not responding'.\
+          format(server,config.login[server]['IP'])
+        
 
   def GetBitmap( self, data):
     import wx

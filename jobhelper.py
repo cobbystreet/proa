@@ -97,12 +97,19 @@ def uniq(seq):
   return [ x for x in seq if str(x) not in seen and not seen_add(str(x))]
 
 def reloadMods(modNames,target=None):
-  for m in modNames:
-    if m in sys.modules:
-      del sys.modules[m]
-    sys.modules[m]=__import__(m)
-    if target!=None:
-      setattr(target,m,sys.modules[m])
+  oldPath=sys.path
+  try:
+    # Provide the configured pythonPath in case some of the reloaded
+    # modules are located there.
+    sys.path+=config.pythonPath
+    for m in modNames:
+      if m in sys.modules:
+        del sys.modules[m]
+      sys.modules[m]=__import__(m)
+      if target!=None:
+        setattr(target,m,sys.modules[m])
+  finally:
+    sys.path[:]=oldPath # Restore
 
 def loadConfig():
   oldPath=list(sys.path)
@@ -118,7 +125,7 @@ def loadJobTypes():
   try:
     xmlfields.parse(config.jobTypes)
   except:
-    # Couldn't load jobType config. Trying defaults in PROA directory.
+    print >>sys.stderr,"Couldn't load jobType config. Trying defaults in PROA directory."
     path=os.path.dirname(os.path.realpath(__file__))
     xmlfields.parse(os.path.join(path,config.jobTypes))
   return xmlfields

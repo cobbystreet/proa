@@ -1,11 +1,11 @@
 <allsets><dataServer use="True" /><plotset name="default"><reset>print &gt;&gt;gnuplot,'reset'</reset><plot>print &gt;&gt;gnuplot,'plot x'</plot><sc>0</sc><sc>0</sc><sc>0</sc><sc>0</sc></plotset><geometry height="556" width="1132" x="2124" y="445" /><plotset name="data"><reset>allJobs=findjobs.gimmeAll()
 allJobs=findjobs.applyFilters(allJobs,[\
-	[lambda x:not 'sequence' in x['meta']],\
-#	[lambda x:float(x['params']['q'])&lt;=-0.5,'q'],\
+	lambda x:not 'sequence' in x['meta'],\
+#	[lambda x:float(x)&lt;=-2.5,'q'],\
 ])
-dnum=range(5)
+selection=range(5)
 allJobs.sort(key=lambda x:x['meta']['time'],reverse=True)
-extra['metas'],extra['params'],ukeys=findjobs.printJobs(allJobs,dnum)
+extra['metas'],extra['params'],ukeys=findjobs.selectJobs(allJobs,selection)
 data['data']=[]
 for job in extra['metas']:
 	try:

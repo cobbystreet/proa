@@ -82,7 +82,9 @@ class resetThread(threading.Thread):
       import wx
       wx.PostEvent(self.wxapp,self.wxapp.DataLabelEvent\
                    (data="data read ({}): {}".format(len(data),self.restext)))
-    except (NameError,ImportError):
+    except (NameError,ImportError,PyDeadObjectError):
+      # The PyDeadObjectError may be raised if the wxapp has died since 
+      # this thread was started. That's ok. We won't post then
       pass
     self.running=False
 

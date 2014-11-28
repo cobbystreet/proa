@@ -33,6 +33,26 @@ lastallfd=[]
 lastintlen=[]
 
 def findFiles(directory, pattern,dirItems=None):
+  """
+  Iterator over files in a directory that match a patter.
+
+  Parameters:
+  -----------
+
+  directory: String
+    The directory in which to look for files
+
+  pattern: String
+    A shell glob pattern for files to find
+
+  dirItems: List (optional)
+    If present, only subdirectory names that are present in
+    "dirItems" will be scanned
+
+  Returns:
+  --------
+  fileIterator: An iterator for the matching files.
+  """
   for root, dirs, files in os.walk(directory,followlinks=True):
     if dirItems!=None:
       # assign to contents of dirs instead of dirs to keep the reference
@@ -82,8 +102,17 @@ def gimmeAll(dir=None,checksize=False,jobTypes=None,node=None):
   Parameters
   ----------
 
-  dir : string
+  dir : string or list of strings
     The directory in which gimmeAll performs a recursive search
+    The interpretation depends on the global variable "useServer"
+    if useServer==True:
+      "dir" should be of the form "loginnode:path"
+      If the "path" part is a relative path, the "loginnode"'1
+        "baseDir" will be prepended.
+      If the "path" part is missing, the entire "baseDir" on
+        the "loginnode" will be searched
+    if useServer==False:
+      "dir" is taken to be an absolute path on the local machine.
 
   checksize : Boolean
     Compute the cumulative size for all directories. This can
@@ -107,21 +136,33 @@ def gimmeAll(dir=None,checksize=False,jobTypes=None,node=None):
     return []
 
   if jobTypes==None:
+#    import platform
     jobTypes=jobhelper.loadJobTypes()
+    # print >>sys.stderr,'loaded jobs',platform.node()
+    # print >>sys.stderr,'types:'," ".join([i.attrib['name'] for i in\
+    #                                       jobTypes.findall('jobtype')])
 
   if useServer:
     import dataserver
     if dir==None:
       dir=[(k,config.login[k]['baseDir']) for k in config.login]
     else:
-      if dir is list:
+      if isinstance(dir,list):
         dir=[d.split(':') for d in dir]
       else:
         dir=[dir.split(':')]
     allJobs=[]
     for d in dir:
-      if d[1]=='':
-        d[1]=config.login[d[0]]['baseDir']
+      if not running:
+        break
+      if (len(d)==1) or (d[1]==''):
+        try:
+          d[1]=config.login[d[0]]['baseDir']
+        except KeyError:
+          print >>sys.stderr,"No loginnode with name '{}' found.".format(d[0])
+          continue
+      if (not os.path.isabs(d[1])):
+        d[1]=os.path.join(config.login[d[0]]['baseDir'],d[1])
       try:
         allJobs+=dataserver.makeRequest(config.login[d[0]]['IP'],config.login[d[0]]['port']\
                                       ,('g',(d[1],checksize,jobTypes,d[0]),config.varMods))
@@ -231,38 +272,6 @@ def gimmeAll(dir=None,checksize=False,jobTypes=None,node=None):
   print >>sys.stderr,'lastallfd:',len(lastallfd),len(allfd)
   return allfd
 
-def getintlen(allfd):
-    global lastintlen
-    for i in range(len(allfd)):
-        pastres=[j for (j,x) in zip(range(len(lastintlen)),lastintlen) if x[2]==allfd[i][2]]
-        if (len(pastres)>0):
-            curset=pastres[0]
-        else:
-            lastintlen.append([0,'nan',allfd[i][2]])
-            curset=len(lastintlen)-1
-        try:
-            t=getmtime(allfd[i][2]+"/BELout")
-            if (not ('BEL' in allfd[i][1])) or (str(allfd[i][1]['BEL'])=='nan'):
-                allfd[i][1]['BEL']='some'
-            if ((t>lastintlen[curset][0]) or (lastintlen[curset][1]=='nan')):
-              from subprocess import check_output
-              grepOut=check_output("grep '^R' "+allfd[i][2]+"/BELout | tail -n 1",\
-                                   stderr=None,shell=True)
-              res=str(float(grepOut.split()[1]))
-            # allfd[i][1]['intlen']=str(float(check_output(["tail","-n","1",allfd[i][2]+"/"+"BELout"],stderr=None).split(" ")[1]))
-              lastintlen[curset][0]=t
-            else:
-              res=lastintlen[curset][1]
-        except OSError:
-            allfd[i][1]['BEL']='nan'
-            res='nan'
-        except IndexError as ex:
-#            print >>sys.stderr,str(ex)
-            res='nan'
-        lastintlen[curset][1]=res
-        allfd[i][1]['intlen']=res
-    return allfd
-
 def myfilter(allfd,key,value="",regex=""):
   try:
     allvalues=jobhelper.uniq([x['params'][key] for x in allfd])
@@ -293,53 +302,120 @@ def myfilter(allfd,key,value="",regex=""):
       return []
   return allfd
 
-def applyFilters(allfd,filters):
-  print >>sys.stderr,"Starting with {} fds.".format(len(allfd))
+def applyFilters(allJobs,filters):
+  """
+  Filter a list of jobs.
+
+  Only jobs that pass all filters are returned.
+
+  Parameters:
+  ----------
+
+  allJobs: A list of jobs as returned my gimmeAll.
+
+  filters: list of filters
+    Each filter can be of either of the following forms
+      A general test function: 
+        Example:
+          lambda x:x['meta']['jobtype']=='freespace'
+
+      A list with the first element a test function, the second a key,
+        and the third either 'params' or 'meta'.
+        Example:
+          [lambda x:x==freespace,'jobtype','meta']
+
+        is equivalent to the above. The advantage of the second form
+        is that applyFilters knows which dictionary and which key you
+        are referring to and can provide help if the filter results in
+        an empty list.
+        The third entry in this list may be omitted in which case
+        'params' is assumed.
+
+    Note that the contents of the job descriptor are all strings, so
+    you may need to do type conversion before numeric comparisons.
+    Example:
+      [lambda x:float(x)>0.3,'deltaT']
+
+  Returns:
+  --------
+
+  filteredJobs : The list of jobs that passed all filters (may be []).
+      
+  """
+  print >>sys.stderr,"Starting with {} fds.".format(len(allJobs))
   for f in filters:
-    if len(f)>2:
-      sel=f[2]
+    if isinstance(f,list):
+      if len(f)>2:
+        sel=f[2]
+      else:
+        sel='params'
+      filteredJobs=filter(lambda x:(f[1] in x[sel]) and (f[0](x[sel][f[1]])),allJobs)
+      print >>sys.stderr,"Reduced to {} due to filter {}".format(len(filteredJobs),f[2:0:-1])
     else:
-      sel='params'
-    if len(f)>1:
-      allfd=filter(lambda x:(f[1] in x[sel]) and (f[0](x)),allfd)
-    else:
-      allfd=filter(lambda x:f[0](x),allfd)
-    print >>sys.stderr,"Reduced to {} due to filter {}".format(len(allfd),f[1:])
-#    print >>sys.stderr,[x[1]['opname'] for x in allfd],[x[2] for x in allfd]
-    if (len(allfd)==0):
-      try:
-        key=f[1]
-        allvalues=jobhelper.uniq([x[sel][key] for x in allfd])
-      except KeyError:
-        print >>sys.stderr, "Key '"+key+"' not valid."
-        try:
-          print >>sys.stderr, "available keys : "+str(allfd[0][sel].keys())
-        except IndexError:
-          print >>sys.stderr, "list is empty"
-        return []
+      filteredJobs=filter(lambda x:f(x),allJobs)
+    if (len(filteredJobs)==0):
       print >>sys.stderr, "Filter '"+str(f[0])+"' resulted in empty list"
       frame,filename,line_number,function_name,lines,index=\
           inspect.getouterframes(inspect.currentframe())[1]
       print jobhelper.printerr("at {0} line {1}".format(filename,line_number),col=31)
-      print >>sys.stderr, "available values : "+str(allvalues)
+      if isinstance(f,list):
+        try:
+          key=f[1]
+          allvalues=jobhelper.uniq([x[sel][key] for x in allJobs])
+          print >>sys.stderr, "available values : "+str(allvalues)
+        except KeyError:
+          print >>sys.stderr, "Key '"+key+"' not valid."
+          try:
+            print >>sys.stderr, "available keys : "+str(allJobs[0][sel].keys())
+          except IndexError:
+            print >>sys.stderr, "list is empty"
+#          return []
       return []
-  return allfd
+    allJobs=filteredJobs
+  return allJobs
 
-def printJobs(allJobs,dnum=0,specialDir=None,lim=20,getIntlen=False):
+def selectJobs(allJobs,selection=0,specialDir=None,lim=20):
+  """
+  Select a certain set of jobs and print their characteristics.
+
+  Parameters:
+  -----------
+
+  allJobs: List of jobs as returned from gimmeAll
+
+  selection: Either a maximum index or a list of indices into the allJobs list
+
+  specialDir: A list of directory names
+    Jobs from allJobs will be chosen in addition to those specified by "selection"
+    if their directory is in "specialDir". Since the indexing in "allJobs" 
+    changes as new jobs are processed, "specialDir" can be used to add fixed jobs
+    to the selection.
+  
+  lim: integer, the number of jobs printed to the console. This does not
+    affect the selection.
+
+  Returns:
+  --------
+
+  metas: List of 'meta' dictionaries of the selected jobs
+
+  params: List of 'params' dictionaries of the selected jobs
+
+  ukeys: List of keys for 'params' whose values change amongst the selected jobs.
+    
+  """
   try:
-    metas=[x['meta'] for x in allJobs[dnum:dnum+1]]
-    params=[x['params'] for x in allJobs[dnum:dnum+1]]
+    metas=[x['meta'] for x in allJobs[selection:selection+1]]
+    params=[x['params'] for x in allJobs[selection:selection+1]]
   except TypeError:
-    metas=[allJobs[i]['meta'] for i in dnum if i<len(allJobs)]
-    params=[allJobs[i]['params'] for i in dnum if i<len(allJobs)]
+    metas=[allJobs[i]['meta'] for i in selection if i<len(allJobs)]
+    params=[allJobs[i]['params'] for i in selection if i<len(allJobs)]
 
   if specialDir!=None:
-    metas+=[x['meta'] for x in allJobs if x['meta']['dir']==d for d in specialDir]
-    params+=[x['params'] for x in allJobs if x['meta']['dir']==d for d in specialDir]
+    metas+=[x['meta'] for d in specialDir for x in allJobs if x['meta']['dir']==d]
+    params+=[x['params'] for d in specialDir for x in allJobs if x['meta']['dir']==d]
  
   allJobs=allJobs[:lim]
-  if (getIntlen):
-    allJobs=getintlen(allJobs)
   ukeys=getUkeys(allJobs,ignore=['repr'])
   sys.stderr.write('\033[m')
   for ind,fd in enumerate(reversed(allJobs)):
@@ -352,8 +428,8 @@ def printJobs(allJobs,dnum=0,specialDir=None,lim=20,getIntlen=False):
     except (IndexError,KeyError):
       pass
     try:
-      print >>sys.stderr,len(allJobs)-1-ind,fd['meta']['node']+':'+fd['meta']['dir'],fd['meta']['time']\
-        ,[(a,fd['params'][a]) for a in ukeys],
+      print >>sys.stderr,len(allJobs)-1-ind,fd['meta']['node']+':'+fd['meta']['dir']\
+        ,fd['meta']['time'],[(a,fd['params'][a]) for a in ukeys],
     except (IndexError,KeyError):
       pass
     if (fd['meta'] in metas):
@@ -394,24 +470,106 @@ def testfile(dir,name,time=0,redoCommand=None):
                       and (getmtime(pJoin(dir,dep))>getmtime(pJoin(dir,name)))\
                     for dep in redoCommand[2].split(',')]).any())))
            
-def openFile(dir,name,levelac=[""],levelom=[],fielddrop=[],fieldsplit=' +',\
+def openFile(dir,name,accept=[""],ommit=[],fielddrop=[],fieldsplit=' +',\
              redo=True,addparam="",forceReDo=False,redoCommand=None):
+  """
+  Load a dataset from a file.
+
+  Each input file may contain many different datasets that are
+  differentiated by some marker.
+
+  As an example, consider a file with these contents
+
+  J -2.0 0.00272646246511 0.0
+  J -1.0 1.41234252291 0.0
+  J 0.0 0.00272646246511 0.0
+  J 1.0 1.96145336762e-11 0.0
+  J 2.0 5.25866406507e-25 0.0
+  J E
+  J -2.0 0.00227325660377 0.00194231103174
+  J -1.0 1.40416016339 -0.0874198500234
+  J 0.0 0.00227325660377 0.00194231103174
+  J 1.0 -2.84726331593e-11 3.63116650092e-12
+  J 2.0 1.04260353846e-24 6.79679755242e-25
+  J E
+  J -2.0 0.000856650893626 0.00378290065263
+  J -1.0 1.38067551289 -0.169968922789
+  J 0.0 0.000856650893626 0.00378290065263
+  J 1.0 7.28222666532e-11 -4.20170562905e-11
+  J 2.0 1.21045750364e-23 7.36211970085e-24
+  J E
+
+  This is a dataset identified by the marker 'J' at the beginning of each
+  line. The dataset contains three blocks terminated with a line
+  containing 'J E'. Each block contains five lines and each line contains
+  three fields
+
+  Such a dataset can be thought of as a multi dimensional array of values
+  with the dimensions (3 blocks ,5 lines ,3 fields)
+  
+  To load such a dataset, the "accept" and "ommit" lists need to contain
+  regular expressions for each dimension of the dataset.
+
+  In the preceding example, the "accept" fields would be:
+
+  ["J","J E"]
+
+  This means, on the innermost level match all lines that contain the "J"
+  character. One level higher up, match all lines that contain the sequence
+  "J E". This could continue one with even more sequences to construct
+  datasets of higher dimensionality.
+  
+  But in order not to mach the higher order lines with the lower order
+  expressions, the "ommit" list may contain regular expressions that are
+  to be excluded. So for instance:
+
+  ["J E",""]
+
+  Thus, the second order identifyer will not be matched with on the first
+  level. On the second level there is nothing to be omitted in this simple.
+  example.
+  
+  "fieldsplit" may contain a regular expression with which to split each
+  line into fields.
+
+  If there are undesired fields in the data set (such as the marker), they
+  may be removed by including them in the "fielddrop" list. For the
+  present example, this would be
+
+  ["J"]
+
+  Parameters:
+  -----------
+
+  dir: Either a string with a directory on the local host or a
+    'meta' dictionary of a job as returned by gimmeAll
+
+  name: Filename to open
+
+  Returns:
+  --------
+
+  alldata: ndarray with the data.
+  """
   global cacheGplFiles
 
   if not running:
-    return []
+    return np.ndarray(0)
 
   if (forceReDo or redo) and (redoCommand==None):
     jobTypes=jobhelper.loadJobTypes()
 
-    for i in jobTypes.findall("command"):
-      if i.attrib["name"]==name:
-        redoCommand=[i.text,i.attrib["out"],i.attrib.get("depend",None)]
+    jobType=jobTypes.find('command[@name="{}"]'.format(name))
+    if jobType!=None:
+      redoCommand=[jobType.text,jobType.attrib["out"],jobType.attrib.get("depend",None)]
+    else:
+      redo=False
+      forceReDo=False
 
   if useServer:
     try:
       if dir['node']==None:
-        raise ValueError("Can't use a dataserver since there isno 'node' info in the meta set")
+        raise ValueError("Can't use a dataserver since there is no 'node' info in the meta set")
     except TypeError:
       raise TypeError("If you want me to use a dataserver to retrieve data,\n"\
         +"you need to supply the whole 'meta' set instead of just the directory")
@@ -420,7 +578,7 @@ def openFile(dir,name,levelac=[""],levelom=[],fielddrop=[],fieldsplit=' +',\
     return dataserver.makeRequest\
       (config.login[dir['node']]['IP'],config.login[dir['node']]['port'],\
        ('o'\
-        ,(dir,name,levelac,levelom,fielddrop,fieldsplit,redo,addparam,forceReDo,redoCommand)\
+        ,(dir,name,accept,ommit,fielddrop,fieldsplit,redo,addparam,forceReDo,redoCommand)\
         ,config.varMods))
 
   if isinstance(dir,dict):
@@ -429,7 +587,7 @@ def openFile(dir,name,levelac=[""],levelom=[],fielddrop=[],fieldsplit=' +',\
 
   redone=False
 
-  ident=str(dir)+str(name)+str(levelac)+str(levelom)+str(fielddrop)+str(fieldsplit)
+  ident=str(dir)+str(name)+str(accept)+str(ommit)+str(fielddrop)+str(fieldsplit)
   if ((forceReDo) or (redo and testfile(dir,name,redoCommand=redoCommand))):
     if redoCommand!=None:
       cmd=redoCommand[0]+' '+addparam
@@ -447,24 +605,24 @@ def openFile(dir,name,levelac=[""],levelom=[],fielddrop=[],fieldsplit=' +',\
   if (redone or not ident in [x[0] for x in cacheGplFiles] or 
       (testfile(dir,name,[x[2] for x in cacheGplFiles if x[0]==ident][0]))):
     myfile=open(pJoin(dir,name),'r')
-    levelct=[0]*len(levelac)
-    lacre=[re.compile(a) for a in levelac]
-    lomre=[re.compile(a) for a in levelom]
+    levelct=[0]*len(accept)
+    lacre=[re.compile(a) for a in accept]
+    lomre=[re.compile(a) for a in ommit]
     fdre=[re.compile(a) for a in fielddrop]
     splitre=re.compile(fieldsplit)
     fieldlen=0
     irn=0
     filelength=os.path.getsize(dir+"/"+name)
-    levelInd=[[] for i in levelac]
+    levelInd=[[] for i in accept]
     alldata=list()
     ins=myfile.readline()
     while (ins != ""):
       if not running:
         break
       ins=ins.rstrip("\n")
-      for i in range(len(levelac)):
-        if ((levelac[i] == "") or (lacre[i].search(ins) != None))\
-           and ((i>=len(levelom)) or (levelom[i]=="") or (lomre[i].search(ins) == None)):
+      for i in range(len(accept)):
+        if ((accept[i] == "") or (lacre[i].search(ins) != None))\
+           and ((i>=len(ommit)) or (ommit[i]=="") or (lomre[i].search(ins) == None)):
           if i==0:
             fields=[f for f in splitre.split(ins) if (f!='') and (not f in fielddrop)]
             if (fieldlen<len(fields)):
@@ -518,7 +676,7 @@ def openFile(dir,name,levelac=[""],levelom=[],fielddrop=[],fieldsplit=' +',\
       except:
         result=np.zeros(0)
         traceback.print_exc(file=sys.stderr)
-        print >>sys.stderr,len(levelom)
+        print >>sys.stderr,len(ommit)
         print >>sys.stderr,levelct
         print >>sys.stderr,adLen
         print >>sys.stderr,irn

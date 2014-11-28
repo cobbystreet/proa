@@ -87,7 +87,7 @@ supportDir='support'
 pythonPath=['./']
 
 # Description of job types with support files and input parameter fields
-jobTypes='proaconfig.xml'
+jobTypes='jobtypes.xml'
 
 # Identifier file placed in each job directory with job meta data.
 jobFile='.job'

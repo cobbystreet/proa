@@ -41,8 +41,6 @@ import findjobs
 
 pid=None
 
-runningProcs=[]
-
 watchProc=None
 killed=False
 
@@ -84,36 +82,38 @@ def exePath(program):
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('-t','--threads',type=int)
-parser.add_argument('--nodearg',nargs='?',const=None)
-parser.add_argument('-f','--files',nargs='+')
-parser.add_argument('--link',action='store_true')
-parser.add_argument('-p','--profile',action='store_true')
-parser.add_argument('-P','--path',nargs='+',default=config.pythonPath)
-parser.add_argument('--jobtype')
-parser.add_argument('-i','--input')
-parser.add_argument('-r','--redo',nargs='?',const='LAST')
-parser.add_argument('-l','--loginnode')
-parser.add_argument('--runnode')
-parser.add_argument('--stripPaths',action='store_true')
-parser.add_argument('--longoutput',action='store_true')
-parser.add_argument('--fireaway',action='store_true')
-parser.add_argument('--nogitrev',action='store_true')
-parser.add_argument('--libpath')
-parser.add_argument('--preload')
-parser.add_argument('--precommand')
-parser.add_argument('--trace')
-group = parser.add_mutually_exclusive_group(required=True)
-group.add_argument('--show',action='store_true')
-group.add_argument('--cmd')
+parser.add_argument('--jobtype',help='Specify a jobtype from {} to use for defaults'.format(config.jobTypes))
+parser.add_argument('-t','--threads',type=int,help='Set OpenMP thread count in environment')
+parser.add_argument('--nodearg',nargs='?',const=None,help='Manually select a slave node')
+parser.add_argument('-f','--files',nargs='+',help='List support files for the job')
+parser.add_argument('--link',action='store_true',help='Link to support files instead of copy')
+parser.add_argument('-p','--profile',action='store_true',help='Do not create a job directory. Just perform a profile run')
+parser.add_argument('-P','--path',nargs='+',default=config.pythonPath,help='Provide additional PYTHONPATH paths')
+parser.add_argument('-i','--input',help='Input parameter file')
+parser.add_argument('--description',help='Job description')
+parser.add_argument('-r','--redo',nargs='?',const='LAST',help='Rerun a previous job. Files are transfered again!')
+parser.add_argument('-l','--loginnode',help='Loginnode for job submission')
+parser.add_argument('--runnode',help=argparse.SUPPRESS)
+parser.add_argument('--noStripPaths',action='store_true',help='Do not remove paths from support files. You almost certainly don\'t want that!!')
+parser.add_argument('-L','--longoutput',action='store_true',help='Provide the full live job output. Default is a contracted view.')
+parser.add_argument('--fireaway',action='store_true',help='Show no live output of the job. Start and log out.')
+parser.add_argument('--nogitrev',action='store_true',help='Do not try to obtain git revision for the binary')
+parser.add_argument('--libpath',help='Paths to add to LD_LIBRARY_PATH')
+parser.add_argument('--preload',help='Libraries to load via LD_PRELOAD')
+parser.add_argument('--precommand',help='Additional command to run in the job directory before the job command')
+parser.add_argument('--trace',help='Provide a trace library. You almost certainly don\'t want that!!')
+group = parser.add_mutually_exclusive_group()
+group.add_argument('--show',action='store_true',help='Resume live view of the output of a still running job')
+group.add_argument('--cmd',help='Command to execute for the job')
 
-parser.add_argument('--sequence')
-parser.add_argument('--seqname')
-parser.add_argument('--seqstart',type=int)
+parser.add_argument('--sequence',help='Indices to use for a sequence run. \n'\
+                    +'Comma seperated list of non inclusive upper bounds.')
+parser.add_argument('--seqname',help='Provide a descriptive name for a sequence')
+parser.add_argument('--seqstart',type=int,help='Start the sequence at this (linearized) index.')
 parser.add_argument('--seqpreview',action='store_true',\
-                      help="Show the effect of the sequence")
+                      help="Show the effect of running a sequence")
 parser.add_argument('--seqflatdir',action='store_true',\
-                      help='do not create subdirs for sequence runs')
+                      help='Do not create subdirectories for sequence runs')
 
 args=parser.parse_args()
 
@@ -121,15 +121,32 @@ cpFileList=[]
 
 if args.jobtype:
   jobTypes=jobhelper.loadJobTypes()
-  jobtype=jobTypes.find('jobtype[@name="{}"]'.format(args.jobtype))
-  if jobtype==None:
-    print >>sys.stderr,"unknown jobtype {}".format(args.jobtype)
+  jobType=jobTypes.find('jobtype[@name="{}"]'.format(args.jobtype))
+  if jobType==None:
+    print >>sys.stderr,"unknown jobtype {}".format(args.jobType)
   else:
-    for fn in jobtype.findall('support'):
+    for fn in jobType.findall('support'):
       cpFileList.append(fn.attrib['filename'])
 
 if (args.files):
   cpFileList+=args.files
+
+if (not args.show) and (not args.cmd):
+  if jobType!=None:
+    cmd=jobType.find('cmd')
+    if cmd!=None:
+      args.cmd=re.sub('%%INPUT',args.input,cmd.text)
+    else:
+      print >>sys.stderr,'Neither --cmd nor --show specified and the jobtype {} has no default command.'.format(args.jobtype)
+      print >>sys.stderr,'I don\'t know what to do.'
+  else:
+    print >>sys.stderr,'Neither --cmd nor --show specified',
+    if args.jobtype:
+      print >>sys.stderr,'and the jobtype "{}" is unknow.'.format(args.jobtype)
+    else:
+      print >>sys.stderr,'and no jobtype provided.'
+    print >>sys.stderr,'I don\'t know what to do.'
+    sys.exit(1)
 
 if args.cmd:
   binary=args.cmd.split(" ")[0]
@@ -389,7 +406,7 @@ def initDir(runpath,sourcePath,cpFileList=[],meta={}):
   # copy all required files (provided list+input+binary) to rundir
   if (len(cpFileList)>0):
     for f in cpFileList:
-      if (args.stripPaths):
+      if not args.noStripPaths:
         f=os.path.basename(f)
       dest=os.path.join(runpath,f)
       source=os.path.join(sourcePath,f)
@@ -411,7 +428,7 @@ def initDir(runpath,sourcePath,cpFileList=[],meta={}):
 
   if args.input:
     f=args.input
-    if (args.stripPaths):
+    if args.noStripPaths:
       f=os.path.basename(f)
     meta['input']=f
   findjobs.saveJobMeta(os.path.join(runpath,config.jobFile),meta)
@@ -486,7 +503,6 @@ if args.loginnode:
     print >>sys.stderr,'copying files to cluster:',cpFileList
     subprocess.call(['scp','-p','-q']+cpFileList\
                     +[args.loginnode+':'+supportDir])
-    clientargs.append('--stripPaths')
   
   jobhelper.sshCall(clientargs,args.loginnode,supportDir)
 else:
@@ -577,26 +593,29 @@ else:
       if not args.show:
         initDir(runpath,sourcePath,cpFileList,meta=meta)
         pid=execCmd(command,runpath,args.cmd,config.jobScript)
-        # ask user for description, possibly initializing from previous choice
-        if args.redo:
-          try:
-            description=meta['desc']
-          except KeyError:
-            print 'empty desc returned from jobfile'
+        if not args.description:
+          # ask user for description, possibly initializing from previous choice
+          if args.redo:
+            try:
+              description=meta['desc']
+            except KeyError:
+              print 'empty desc returned from jobfile'
+              description=''
+          else:
             description=''
+          if useRL:
+            try:
+              readline.read_history_file('runjob.history')
+            except IOError:
+              pass
+            readline.set_startup_hook(lambda: readline.insert_text(description))
+          description=raw_input('Description please:')
+          if useRL:
+            readline.set_startup_hook()
+            readline.write_history_file('runjob.history')
+          meta['desc']=description
         else:
-          description=''
-        if useRL:
-          try:
-            readline.read_history_file('runjob.history')
-          except IOError:
-            pass
-          readline.set_startup_hook(lambda: readline.insert_text(description))
-        description=raw_input('Description please:')
-        if useRL:
-          readline.set_startup_hook()
-          readline.write_history_file('runjob.history')
-        meta['desc']=description
+          meta['desc']=args.description
         findjobs.saveJobMeta(os.path.join(runpath,config.jobFile),meta)
       else:
         pid=findjobs.loadJobMeta(os.path.join(runpath,config.jobFile))['pid'].split("--")

@@ -61,7 +61,7 @@ class requestThread(threading.Thread):
     self.clientSock=clientSock
     self.start()
 
-  def start(self):
+  def run(self):
     global lastallfd,cacheGplFiles,outSocket
     self.resultStream=self.clientSock.makefile('wb',buffer_size)
     outSocket=self.resultStream
@@ -84,7 +84,10 @@ class requestThread(threading.Thread):
       except IOError:
         outSocket=None
         print >>stderr,traceback.format_exc()
-    self.resultStream.close()
+    try:
+      self.resultStream.close()
+    except socket.error:
+        print >>stderr,traceback.format_exc()
     self.clientSock.close()
     outSocket=None
     self.running=False
@@ -133,6 +136,7 @@ class dataServer:
         print >>sys.stderr,'Restarting dataServer...'
       elif request[0]=='c':
         for ar in self.requests:
+          print >>sys.stderr,'Canceling request...'
           ar.stop()
       f.close()
       outSocket=None
@@ -144,14 +148,16 @@ lastServer=None
 lastPort=None
 
 def cancelRequest():
+  print >>sys.stderr,'Cancelling request at',lastServer
   makeRequest(lastServer,lastPort,('c',))
 
 def makeRequest(serverIP,serverPort,request):
+  global lastServer,lastPort
+  datasocket=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
   try:
-    datasocket=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+    datasocket.connect((serverIP,serverPort))
   except socket.error as e:
     raise IOError(str(e))
-  datasocket.connect((serverIP,serverPort))
   f=datasocket.makefile('wb',buffer_size)
   pickle.dump(request,f)
   f.close()

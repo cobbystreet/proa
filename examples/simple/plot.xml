@@ -4,13 +4,15 @@
 allJobs=findjobs.gimmeAll()
 #filter according to some parameter
 allJobs=findjobs.applyFilters(allJobs,[\
-	[lambda x:float(x['params']['q'])&gt;=-0.5,'q'],\
+# The names of available parameters are configured in the
+# "jobtypes.xml" file in the current directory
+	[lambda x:float(x)&gt;=-2.5,'q'],\
 ])
 #sort according to start time
 allJobs.sort(key=lambda x:x['meta']['time'],reverse=True)
 #select the first five jobs found
-dnum=range(5)
-extra['metas'],extra['params'],ukeys=findjobs.printJobs(allJobs,dnum)
+selection=range(5)
+extra['metas'],extra['params'],ukeys=findjobs.selectJobs(allJobs,selection)
 
 #load data
 data['data']=[]

@@ -120,7 +120,7 @@ run
 
 Start the job:
 
-runjob.py --jobtype freespace -i params.py --cmd "./freespace.py params.py"  -l master --nodearg slave
+runjob.py --jobtype freespace -i params.py --cmd "./freespace.py params.py"  --longoutput -l master --nodearg slave
 
 While the job is running, "runjob.py" asks you to enter a one line
 description from which you might later tell what this is all about. Enter
@@ -220,7 +220,7 @@ runjob.py --jobtype freespace -i params.py --cmd "./freespace.py params.py"  -l 
 This will tell you, that "runjob.py" found five different settings. Now execute
 this sequence.
 
-runjob.py --jobtype freespace -i params.py --cmd "./freespace.py params.py"  -l master --nodearg slave --seqname "momentum scan" --sequence 5
+runjob.py --jobtype freespace -i params.py --cmd "./freespace.py params.py"  --longoutput -l master --nodearg slave --seqname "momentum scan" --sequence 5
 
 You won't be asked for a description here, but you may supply a fixed name. You
 also need to specify how many jobs should be run. Since the preview showed
@@ -248,8 +248,8 @@ Alt+Left/Right = Change the analysis set (like changing the combobox)
 Alt+Up/Down = Cycle between the reset and plot command boxes and the spin controls.
 
 
-In order to create a new analysis set, select the one you want to base this on
+In order to create a new analysis set, select the one you want to base the new one on
 (e.g. the empty "default" set) and type a new name in the combobox and hit "Enter".
 A copy will be created under that new name.
 
-All changes are saved automatically.
+All changes are saved automatically to the 'plot.xml' file in the current directory.
