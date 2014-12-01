@@ -133,15 +133,18 @@ class proa(wx.Frame):
     self.scs[1].SetRange(-3,2)
 
 
+    self.progress=[]
+    for i in range(2):
+      self.progress.append(wx.Gauge(self, -1, 100))
+      sizer.Add( self.progress[-1], (resetHeight+plotHeight+1,i),(1,1), wx.EXPAND)
+
     self.label = wx.StaticText(panel,-1,label=u'Hello !\nagain')
     self.label.SetBackgroundColour(wx.BLUE)
     self.label.SetForegroundColour(wx.BLACK)
     self.label.SetFont(wx.Font(7,wx.FONTFAMILY_DEFAULT,wx.FONTSTYLE_NORMAL,\
                                wx.FONTWEIGHT_NORMAL))
-    sizer.Add( self.label, (resetHeight+plotHeight+1,1),(1,self.maxSC), wx.EXPAND )
+    sizer.Add( self.label, (resetHeight+plotHeight+1,len(self.progress)),(1,self.maxSC), wx.EXPAND )
 
-    self.progress = wx.Gauge(self, -1, 100)
-    sizer.Add( self.progress, (resetHeight+plotHeight+1,0),(1,1), wx.EXPAND)
 
 
     self.datasize=wx.StaticText(panel,-1,label=u'none loaded')
@@ -206,6 +209,10 @@ class proa(wx.Frame):
     # This is for the resetThread to be able to post results.
     self.DataLabelEvent, self.EVT_DATA_LABEL = NewEvent()
     self.Bind(self.EVT_DATA_LABEL, self.OnDataLabelChange)
+
+    # This is for the resetThread to be able to report progress.
+    self.ProgressEvent, self.EVT_PROGRESS = NewEvent()
+    self.Bind(self.EVT_PROGRESS, self.OnProgressChange)
 
   def SetFirstSpinRange(self,a):
     self.scs[0].SetRange(0,a)
@@ -437,7 +444,29 @@ class proa(wx.Frame):
       except IOError:
         print >>sys.stderr,'dataServer "{}" ({}) is not responding'.\
           format(server,config.login[server]['IP'])
-        
+
+  def OnProgressChange(self,event):
+    if event.data[1]<len(self.progress):
+      if event.data[0]==True:
+        # Test for actual True here because the 'start' value data[0] might be 'last'
+        # to indicate a finished process.
+        self.progress[event.data[1]].SetRange(event.data[2])
+        self.progress[event.data[1]].SetValue(0)
+      else:
+        try:
+          self.progress[event.data[1]].SetValue(event.data[2])
+        except TypeError:
+          print >>sys.stderr,event.data
+          raise
+
+  def reportProgress(self,start,level,value):
+    try:
+      wx.PostEvent(self,self.ProgressEvent(data=(start,level,value)))
+    except (wx._core.PyDeadObjectError):
+      # The PyDeadObjectError may be raised if the wxapp has died since 
+      # this thread was started. That's ok. We won't post then
+      pass
+
 
   def GetBitmap( self, data):
     import wx

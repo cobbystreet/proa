@@ -52,6 +52,9 @@ class resetThread(threading.Thread):
       self.resetMod=jobhelper.importCode(self.resetCode,"resetMod")
       jobhelper.reloadMods(config.varMods,self.resetMod)
       if self.wxapp!=None:
+        self.wxapp.reportProgress(True,0,len(self.resetCode.split('\n')))
+        self.wxapp.reportProgress(False,0,0)
+        self.resetMod.findjobs.meter=self.wxapp
         self.resetMod.findjobs.useServer=self.wxapp.useServer
       self.resetMod.gnuplot=gnuplot
       self.resetMod.plot.gnuplot=gnuplot
@@ -75,6 +78,8 @@ class resetThread(threading.Thread):
       data={}
       extra={}
       ukeys={}
+    if self.wxapp!=None:
+      self.wxapp.reportProgress(False,0,len(self.resetCode.split('\n')))
     self.wxapp.data=data
     self.wxapp.extra=extra
     self.wxapp.ukeys=ukeys
@@ -82,7 +87,7 @@ class resetThread(threading.Thread):
       import wx
       wx.PostEvent(self.wxapp,self.wxapp.DataLabelEvent\
                    (data="data read ({}): {}".format(len(data),self.restext)))
-    except (NameError,ImportError,PyDeadObjectError):
+    except (NameError,ImportError,wx._core.PyDeadObjectError):
       # The PyDeadObjectError may be raised if the wxapp has died since 
       # this thread was started. That's ok. We won't post then
       pass

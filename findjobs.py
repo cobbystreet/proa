@@ -26,6 +26,7 @@ from os.path import isfile,getmtime
 
 config=jobhelper.loadConfig()
 
+meter=None
 running=True
 useServer=False
 cacheGplFiles=[]
@@ -118,6 +119,9 @@ def gimmeAll(dir=None,checksize=False,jobTypes=None,node=None):
     Compute the cumulative size for all directories. This can
     be VERY slow.
 
+  meter : class
+    A class that will take progress reports
+
   Returns
   -------
   
@@ -143,6 +147,8 @@ def gimmeAll(dir=None,checksize=False,jobTypes=None,node=None):
     #                                       jobTypes.findall('jobtype')])
 
   if useServer:
+    if meter!=None:
+      meter.reportProgress(False,0,inspect.getouterframes(inspect.currentframe())[1][2])
     import dataserver
     if dir==None:
       dir=[(k,config.login[k]['baseDir']) for k in config.login]
@@ -165,7 +171,7 @@ def gimmeAll(dir=None,checksize=False,jobTypes=None,node=None):
         d[1]=os.path.join(config.login[d[0]]['baseDir'],d[1])
       try:
         allJobs+=dataserver.makeRequest(config.login[d[0]]['IP'],config.login[d[0]]['port']\
-                                      ,('g',(d[1],checksize,jobTypes,d[0]),config.varMods))
+                                        ,('g',(d[1],checksize,jobTypes,d[0]),config.varMods),meter)
       except IOError:
         print >>sys.stderr,'dataServer "{}" ({}) is not responding'.\
           format(d[0],config.login[d[0]]['IP'])
@@ -178,9 +184,18 @@ def gimmeAll(dir=None,checksize=False,jobTypes=None,node=None):
     dir=config.login[node]['baseDir']
 
   allfd=[]
-  for fullname in findFiles(dir,config.jobFile):
+  if meter!=None:
+    allFiles=[f for f in findFiles(dir,config.jobFile)]
+    meter.reportProgress(True,1,len(allFiles))
+  else:
+    allFiles=findFiles(dir,config.jobFile)
+  count=0
+  for fullname in allFiles:
     if not running:
       break
+    if meter!=None:
+      meter.reportProgress(False,1,count)
+      count+=1
     path,name=os.path.split(fullname)
     pastres=[x for x in lastallfd if x['meta']['dir']==path]
     curtime=time.time()
@@ -211,7 +226,7 @@ def gimmeAll(dir=None,checksize=False,jobTypes=None,node=None):
       continue
 
     # has the input file changed since last gimmeAll pass?
-    if getmtime(pJoin(path,curset['meta']['input']))>0:#curset['checktime']:
+    if getmtime(pJoin(path,curset['meta']['input']))>curset['checktime']:
       filedata={}
       filesets={}
       curset['params']=filedata
@@ -268,6 +283,8 @@ def gimmeAll(dir=None,checksize=False,jobTypes=None,node=None):
     except (IOError,OSError):
       curset['meta']['suc']=False
     curset['checktime']=curtime
+  if meter!=None:
+    meter.reportProgress('last',1,len(allFiles))
   print >>sys.stderr,""
   print >>sys.stderr,'lastallfd:',len(lastallfd),len(allfd)
   return allfd
@@ -471,7 +488,7 @@ def testfile(dir,name,time=0,redoCommand=None):
                     for dep in redoCommand[2].split(',')]).any())))
            
 def openFile(dir,name,accept=[""],ommit=[],fielddrop=[],fieldsplit=' +',\
-             redo=True,addparam="",forceReDo=False,redoCommand=None):
+             redo=False,addparam="",forceReDo=False,redoCommand=None):
   """
   Load a dataset from a file.
 
@@ -573,13 +590,16 @@ def openFile(dir,name,accept=[""],ommit=[],fielddrop=[],fieldsplit=' +',\
     except TypeError:
       raise TypeError("If you want me to use a dataserver to retrieve data,\n"\
         +"you need to supply the whole 'meta' set instead of just the directory")
-      
+    
+    if meter!=None:
+      meter.reportProgress(False,0,inspect.getouterframes(inspect.currentframe())[1][2])
+
     import dataserver
     return dataserver.makeRequest\
       (config.login[dir['node']]['IP'],config.login[dir['node']]['port'],\
        ('o'\
         ,(dir,name,accept,ommit,fielddrop,fieldsplit,redo,addparam,forceReDo,redoCommand)\
-        ,config.varMods))
+        ,config.varMods),meter)
 
   if isinstance(dir,dict):
     meta=dir
@@ -612,11 +632,19 @@ def openFile(dir,name,accept=[""],ommit=[],fielddrop=[],fieldsplit=' +',\
     splitre=re.compile(fieldsplit)
     fieldlen=0
     irn=0
-    filelength=os.path.getsize(dir+"/"+name)
+
+    if meter!=None:
+      filelength=os.path.getsize(os.path.join(dir,name))
+      filepos=0
+      meter.reportProgress(True,1,filelength)
+
     levelInd=[[] for i in accept]
     alldata=list()
     ins=myfile.readline()
     while (ins != ""):
+      if meter!=None:
+        filepos+=len(ins) # +1 for the removed \n
+        meter.reportProgress(False,1,filepos)
       if not running:
         break
       ins=ins.rstrip("\n")
@@ -636,6 +664,8 @@ def openFile(dir,name,accept=[""],ommit=[],fielddrop=[],fieldsplit=' +',\
       ins=myfile.readline()
       irn+=1
     myfile.close()
+    if meter!=None:
+      meter.reportProgress('last',1,filepos)
 
     # print 'alldata',levelInd,levelct
 
