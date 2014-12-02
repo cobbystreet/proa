@@ -452,16 +452,20 @@ class proa(wx.Frame):
         # to indicate a finished process.
         self.progress[event.data[1]].SetRange(event.data[2])
         self.progress[event.data[1]].SetValue(0)
+        if (len(event.data)>3) and (event.data[3]!=None):
+          self.label.SetLabel(str(event.data[3]))
       else:
         try:
           self.progress[event.data[1]].SetValue(event.data[2])
+          if (event.data[0]=='last') and (len(event.data)>3) and (event.data[3]!=None):
+            self.label.SetLabel(str(event.data[3]))
         except TypeError:
           print >>sys.stderr,event.data
           raise
 
-  def reportProgress(self,start,level,value):
+  def reportProgress(self,start,level,value,label=None):
     try:
-      wx.PostEvent(self,self.ProgressEvent(data=(start,level,value)))
+      wx.PostEvent(self,self.ProgressEvent(data=(start,level,value,label)))
     except (wx._core.PyDeadObjectError):
       # The PyDeadObjectError may be raised if the wxapp has died since 
       # this thread was started. That's ok. We won't post then

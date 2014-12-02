@@ -233,8 +233,83 @@ This is all for the tutorial for now.
 Have fun.
 
 
-Part4: Tips and Tricks
------
+
+Part 4: findjobs.openFile
+-------
+
+Here is a bit of explanation on how to open data files from "findjobs.py".
+(As always, "Use the source, Luke!")
+
+  Each input file may contain many different datasets that are
+  differentiated by some marker.
+
+  As an example, consider a file with these contents
+
+  J -2.0 0.00272646246511 0.0
+  J -1.0 1.41234252291 0.0
+  J 0.0 0.00272646246511 0.0
+  J 1.0 1.96145336762e-11 0.0
+  J 2.0 5.25866406507e-25 0.0
+  J E
+  J -2.0 0.00227325660377 0.00194231103174
+  J -1.0 1.40416016339 -0.0874198500234
+  J 0.0 0.00227325660377 0.00194231103174
+  J 1.0 -2.84726331593e-11 3.63116650092e-12
+  J 2.0 1.04260353846e-24 6.79679755242e-25
+  J E
+  J -2.0 0.000856650893626 0.00378290065263
+  J -1.0 1.38067551289 -0.169968922789
+  J 0.0 0.000856650893626 0.00378290065263
+  J 1.0 7.28222666532e-11 -4.20170562905e-11
+  J 2.0 1.21045750364e-23 7.36211970085e-24
+  J E
+
+  This is a dataset identified by the marker 'J' at the beginning of each
+  line. The dataset contains three blocks terminated with a line
+  containing 'J E'. Each block contains five lines and each line contains
+  three fields
+
+  Such a dataset can be thought of as a multi dimensional array of values
+  with the dimensions (3 blocks ,5 lines ,3 fields)
+  
+  To load such a dataset, the "accept" and "ommit" lists need to contain
+  regular expressions for each dimension of the dataset.
+
+  In the preceding example, the "accept" fields would be:
+
+  ["J","J E"]
+
+  This means, on the innermost level match all lines that contain the "J"
+  character. One level higher up, match all lines that contain the sequence
+  "J E". This could continue on with even more sequences to construct
+  datasets of higher dimensionality.
+  
+  But in order not to mach the higher order lines with the lower order
+  expressions, the "ommit" list may contain regular expressions that are
+  to be excluded. So for instance:
+
+  ["J E",""]
+
+  Thus, the second order identifyer will not be matched on the first
+  level. On the second level there is nothing to be omitted in this simple.
+  example.
+  
+  "fieldsplit" may contain a regular expression with which to split each
+  line into fields.
+
+  If there are undesired fields in the data set (such as the marker), they
+  may be removed by including them in the "fielddrop" list. For the
+  present example, this would be
+
+  ["J"]
+
+  With these settings, the entire call would look like this
+
+  findjobs.openFile(job,'datafile',['J ','J E'],['J E'],['J'])
+
+
+Part 5: Tips and Tricks
+-------
 
 Use the --redo parameter to "runplot.py" to rerun a job that has failed.
 

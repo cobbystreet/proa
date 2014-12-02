@@ -52,7 +52,7 @@ class resetThread(threading.Thread):
       self.resetMod=jobhelper.importCode(self.resetCode,"resetMod")
       jobhelper.reloadMods(config.varMods,self.resetMod)
       if self.wxapp!=None:
-        self.wxapp.reportProgress(True,0,len(self.resetCode.split('\n')))
+        self.wxapp.reportProgress(True,0,len(self.resetCode.split('\n')),'resetting...')
         self.wxapp.reportProgress(False,0,0)
         self.resetMod.findjobs.meter=self.wxapp
         self.resetMod.findjobs.useServer=self.wxapp.useServer
@@ -79,7 +79,7 @@ class resetThread(threading.Thread):
       extra={}
       ukeys={}
     if self.wxapp!=None:
-      self.wxapp.reportProgress(False,0,len(self.resetCode.split('\n')))
+      self.wxapp.reportProgress('last',0,len(self.resetCode.split('\n')),'Done with reset')
     self.wxapp.data=data
     self.wxapp.extra=extra
     self.wxapp.ukeys=ukeys

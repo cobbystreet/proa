@@ -135,16 +135,13 @@ def gimmeAll(dir=None,checksize=False,jobTypes=None,node=None):
       last time the job was checked (seconds since epoch)
   """
   global lastallfd
+  import xml.etree.ElementTree as ET
 
   if not running:
     return []
 
   if jobTypes==None:
-#    import platform
     jobTypes=jobhelper.loadJobTypes()
-    # print >>sys.stderr,'loaded jobs',platform.node()
-    # print >>sys.stderr,'types:'," ".join([i.attrib['name'] for i in\
-    #                                       jobTypes.findall('jobtype')])
 
   if useServer:
     if meter!=None:
@@ -185,8 +182,9 @@ def gimmeAll(dir=None,checksize=False,jobTypes=None,node=None):
 
   allfd=[]
   if meter!=None:
+    meter.reportProgress(True,1,1,'Preparing to scan "{}"'.format(dir))
     allFiles=[f for f in findFiles(dir,config.jobFile)]
-    meter.reportProgress(True,1,len(allFiles))
+    meter.reportProgress(True,1,len(allFiles),'Scanning "{}"'.format(dir))
   else:
     allFiles=findFiles(dir,config.jobFile)
   count=0
@@ -220,29 +218,35 @@ def gimmeAll(dir=None,checksize=False,jobTypes=None,node=None):
       curset['meta']['suc']=False
       curset['meta']['node']=node
       curset['logtime']=0
-    jobtype=jobTypes.find('jobtype[@name="{}"]'.format(curset['meta']['jobtype']))
-    if jobtype==None:
-      print >>sys.stderr,"unknown jobtype {}".format(curset['meta']['jobtype'])
+    jobTypeName=curset['meta']['jobtype']
+    jobType=jobTypes.find('jobtype[@name="{}"]'.format(jobTypeName))
+    if jobType==None:
+      print >>sys.stderr,"unknown jobtype {}".format(jobTypeName)
       continue
 
-    # has the input file changed since last gimmeAll pass?
-    if getmtime(pJoin(path,curset['meta']['input']))>curset['checktime']:
+    jobTypeHash=hash(ET.tostring(jobType))
+
+    # Has the input file changed since last gimmeAll pass?
+    if ((getmtime(pJoin(path,curset['meta']['input']))>curset['checktime'])\
+       # Or has the jobType changed?
+       or (jobTypeHash!=curset.get('jobTypeHash',0))):
       filedata={}
       filesets={}
       curset['params']=filedata
       curset['psets']=filesets
-      if jobtype.attrib['inputtype']=='text':
+      curset['jobTypeHash']=jobTypeHash
+      if jobType.attrib['inputtype']=='text':
         inputContent=open(pJoin(path,curset['meta']['input']),'r').read()
 
-        if jobtype.attrib['name'] in jobFields:
-          fields=jobFields[jobtype.attrib['name']]
+        if jobTypeName in jobFields:
+          fields=jobFields[jobTypeName]
         else:
           fields=[]
-          for i in jobtype.findall("field"):
+          for i in jobType.findall("field"):
             fields.append([i.attrib["name"]\
                            ,re.compile(i.text.replace("FLRE",floatre))\
                            ,int(i.attrib["count"])])
-          jobFields[jobtype.attrib['name']]=fields
+          jobFields[jobTypeName]=fields
         for f in fields:
           result=f[1].search(filecont)
           if (result):
@@ -257,10 +261,10 @@ def gimmeAll(dir=None,checksize=False,jobTypes=None,node=None):
           else:
             if (not (f[0] in filedata.keys())):
               filedata[f[0]]=float('NaN')
-      elif jobtype.attrib['inputtype']=='python':
+      elif jobType.attrib['inputtype']=='python':
         try:
           params=jobhelper.getInput(curset['meta']['input'],path,curset['meta'].get('seqind',None))
-          for k in jobtype.findall("variable"):
+          for k in jobType.findall("variable"):
             name=k.attrib['name']
             filedata[name]=getattr(params,name,'nan')
         except SyntaxError:
@@ -271,14 +275,14 @@ def gimmeAll(dir=None,checksize=False,jobTypes=None,node=None):
     filedata['dirsize']='-1'
 
     try:
-      successtime=getmtime(pJoin(path,jobtype.find('success').attrib['filename']))
+      successtime=getmtime(pJoin(path,jobType.find('success').attrib['filename']))
       if successtime>curset['logtime']:
         curset['logtime']=successtime
         if (checksize):
           from subprocess import check_output
           curset['meta']['dirsize']=check_output(["du",path]).split("\t")[0]
-        if re.search(jobtype.find('success').text,\
-                     open(pJoin(path,jobtype.find('success').attrib['filename']),'r').read()):
+        if re.search(jobType.find('success').text,\
+                     open(pJoin(path,jobType.find('success').attrib['filename']),'r').read()):
           curset['meta']['suc']=True
     except (IOError,OSError):
       curset['meta']['suc']=False
@@ -533,7 +537,7 @@ def openFile(dir,name,accept=[""],ommit=[],fielddrop=[],fieldsplit=' +',\
 
   This means, on the innermost level match all lines that contain the "J"
   character. One level higher up, match all lines that contain the sequence
-  "J E". This could continue one with even more sequences to construct
+  "J E". This could continue on with even more sequences to construct
   datasets of higher dimensionality.
   
   But in order not to mach the higher order lines with the lower order
@@ -542,7 +546,7 @@ def openFile(dir,name,accept=[""],ommit=[],fielddrop=[],fieldsplit=' +',\
 
   ["J E",""]
 
-  Thus, the second order identifyer will not be matched with on the first
+  Thus, the second order identifyer will not be matched on the first
   level. On the second level there is nothing to be omitted in this simple.
   example.
   
@@ -554,6 +558,10 @@ def openFile(dir,name,accept=[""],ommit=[],fielddrop=[],fieldsplit=' +',\
   present example, this would be
 
   ["J"]
+
+  With these settings, the entire call would look like this
+
+  findjobs.openFile(job,'datafile',['J ','J E'],['J E'],['J'])
 
   Parameters:
   -----------
@@ -622,9 +630,10 @@ def openFile(dir,name,accept=[""],ommit=[],fielddrop=[],fieldsplit=' +',\
       ident+=str(redoCommand)+addparam
     redone=True
 
-  if (redone or not ident in [x[0] for x in cacheGplFiles] or 
-      (testfile(dir,name,[x[2] for x in cacheGplFiles if x[0]==ident][0]))):
-    myfile=open(pJoin(dir,name),'r')
+  if redone or (not (ident in [x[0] for x in cacheGplFiles]))\
+     or (testfile(dir,name,[x[2] for x in cacheGplFiles if x[0]==ident][0])):
+    fullPath=pJoin(dir,name)
+    myfile=open(fullPath,'r')
     levelct=[0]*len(accept)
     lacre=[re.compile(a) for a in accept]
     lomre=[re.compile(a) for a in ommit]
@@ -634,9 +643,10 @@ def openFile(dir,name,accept=[""],ommit=[],fielddrop=[],fieldsplit=' +',\
     irn=0
 
     if meter!=None:
-      filelength=os.path.getsize(os.path.join(dir,name))
+      
+      filelength=os.path.getsize(fullPath)
       filepos=0
-      meter.reportProgress(True,1,filelength)
+      meter.reportProgress(True,1,filelength,'Opening file "{}"'.format(fullPath))
 
     levelInd=[[] for i in accept]
     alldata=list()
@@ -660,12 +670,11 @@ def openFile(dir,name,accept=[""],ommit=[],fielddrop=[],fieldsplit=' +',\
             levelInd[i].append(levelct[i-1])
             levelct[i-1]=0
           levelct[i]+=1
-      filePos=myfile.tell()*100/filelength
       ins=myfile.readline()
       irn+=1
     myfile.close()
     if meter!=None:
-      meter.reportProgress('last',1,filepos)
+      meter.reportProgress('last',1,filepos,'Done reading. Matrix aligning result')
 
     # print 'alldata',levelInd,levelct
 
@@ -695,6 +704,7 @@ def openFile(dir,name,accept=[""],ommit=[],fielddrop=[],fieldsplit=' +',\
           aind[dimInd]+=1
           dimInd-=1
         adInd+=1
+      cacheGplFiles.append((ident,result,getmtime(pJoin(dir,name))))
     except:
       # traceback.print_exc(file=sys.stderr)
       adLen=len(alldata)
@@ -702,7 +712,6 @@ def openFile(dir,name,accept=[""],ommit=[],fielddrop=[],fieldsplit=' +',\
         levelct.reverse()
         levelct.append(fieldlen)
         result=np.resize(np.array(alldata),levelct)
-        cacheGplFiles.append((ident,result,getmtime(pJoin(dir,name))))
       except:
         result=np.zeros(0)
         traceback.print_exc(file=sys.stderr)

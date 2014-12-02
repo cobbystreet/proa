@@ -43,6 +43,7 @@ cacheGplFiles=[]
 buffer_size = 4096
 delay = 0.0001
 reportPeriod=getattr(config,'reportPeriod',1)  # number of seconds to wait between issuing reports
+bz2Compress=getattr(config,'bz2Compress',True) # use compression for result transmission
 
 outSocket=None
 stderr=None
@@ -64,6 +65,7 @@ class requestThread(threading.Thread):
     self.start()
 
   def run(self):
+    import bz2
     global lastallfd,cacheGplFiles,outSocket
     self.resultStream=self.clientSock.makefile('wb',buffer_size)
     outSocket=self.resultStream
@@ -73,14 +75,17 @@ class requestThread(threading.Thread):
       self.findjobs.meter=self
       if self.request[0]=='g':
         self.findjobs.lastallfd=lastallfd
-        result=pickle.dumps(('r',self.findjobs.gimmeAll(*self.request[1])))
+        result=self.findjobs.gimmeAll(*self.request[1])
         lastallfd=self.findjobs.lastallfd
       elif self.request[0]=='o':
         self.findjobs.cacheGplFiles=cacheGplFiles
-        result=pickle.dumps(('a',self.findjobs.openFile(*self.request[1])))
+        result=self.findjobs.openFile(*self.request[1])
         # pickle.dump(('a',result.shape,result.dtype,result.tostring()),f)
         cacheGplFiles=self.findjobs.cacheGplFiles
       if self.request[0] in ['g','o']:
+        if bz2Compress:
+          result=bz2.compress(pickle.dumps(result))
+        result=pickle.dumps(('r',result))
         pickle.dump(('s',len(result)),self.resultStream)
         print >>self.resultStream,result
     except Exception, e:
@@ -97,7 +102,7 @@ class requestThread(threading.Thread):
     outSocket=None
     self.running=False
 
-  def reportProgress(self,start,level,value):
+  def reportProgress(self,start,level,value,label=None):
     """
     Report a process progress.
 
@@ -114,13 +119,17 @@ class requestThread(threading.Thread):
 
     value: float
       Either final (if start==True) or current value of process progress.
+
+    label: string
+      Label text to print with progress indicator.
     
     """
     import time
     currentTime=time.time()
     if start or (self.lastReport==None) or (currentTime-self.lastReport>reportPeriod):
       self.lastReport=currentTime
-      pickle.dump(('p',start,level,value),self.resultStream)
+      pickle.dump(('p',start,level,value,label),self.resultStream)
+      self.resultStream.flush()
 
   def stop(self):
     if self.running:
@@ -182,10 +191,11 @@ class meteredReader():
     self.position=None
     self.lastReport=None
     self.buffer=''
+    self.buffer_size=buffer_size
 
   def read(self,count):
     if count>len(self.buffer):
-      result=self.datasocket.recv(buffer_size)
+      result=self.datasocket.recv(self.buffer_size)
       self.add(len(result))
       self.buffer+=result
     result=self.buffer[:count]
@@ -195,10 +205,12 @@ class meteredReader():
   def readline(self):
     nlpos=self.buffer.find('\n')
     while nlpos==-1:
-      result=self.datasocket.recv(buffer_size)
+      result=self.datasocket.recv(self.buffer_size)
       self.add(len(result))
+      nlpos=result.find('\n')
+      if nlpos!=-1:
+        nlpos+=len(self.buffer)
       self.buffer+=result
-      nlpos=self.buffer.find('\n')
     count=nlpos+1
     result=self.buffer[:count]
     self.buffer=self.buffer[count:]
@@ -210,6 +222,12 @@ class meteredReader():
       self.position+=count
       currentTime=time.time()
       if (self.lastReport==None) or (currentTime-self.lastReport>reportPeriod):
+        # Adjust buffer to about a fifth of the amount of data read during
+        # the last reportPeriod. This allows for reasonable speedy progress
+        # update even with changing bandwidth but results in fairly low
+        # system load.
+        self.buffer_size=(self.position-self.lastPosition)/5
+        self.lastPosition=self.position
         self.lastReport=currentTime
         try:
           self.meter.reportProgress(False,self.level,self.position)
@@ -220,11 +238,12 @@ class meteredReader():
     
   def zero(self):
     self.position=0
+    self.lastPosition=0
   
   def close(self):
     if self.position!=None:
       try:
-        self.meter.reportProgress(False,self.level,self.position)
+        self.meter.reportProgress('last',self.level,self.position,'Transmission complete')
       except (wx._core.PyDeadObjectError):
         # The PyDeadObjectError may be raised if the wxapp has died since 
         # this thread was started. That's ok. We won't post then
@@ -250,6 +269,7 @@ def makeRequest(serverIP,serverPort,request,meter=None):
   pickle.dump(request,f)
   f.close()
   if not (request[0] in ['t','r','c']):
+    import bz2
     lastServer=serverIP
     lastPort=serverPort
     if meter!=None:
@@ -263,10 +283,10 @@ def makeRequest(serverIP,serverPort,request,meter=None):
       elif result[0]=='s':
         if meter!=None:
           f.zero()
-          meter.reportProgress(True,1,result[1])
+          meter.reportProgress(True,1,result[1],'Transmitting result')
       elif result[0]=='p':
         if meter!=None:
-          meter.reportProgress(result[1],result[2],result[3])
+          meter.reportProgress(*tuple(result[1:]))
       else:
         break
     f.close()
@@ -274,7 +294,10 @@ def makeRequest(serverIP,serverPort,request,meter=None):
     if result[0]=='e':
       raise result[1](result[2])
     elif result[0]=='r':
-      return result[1]
+      result=result[1]
+      if bz2Compress:
+        result=pickle.loads(bz2.decompress(result))
+      return result
     elif result[0]=='a':
       # todo: do something fancy to reduce network transfer times
       # return np.fromstring(result[3],result[2]).reshape(result[1])
