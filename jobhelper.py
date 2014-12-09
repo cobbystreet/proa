@@ -18,7 +18,6 @@
 
 import os
 import sys
-import new
 import numpy
 
 def importCode(code, name, add_to_sys_modules=False,seqInd=None):
@@ -44,6 +43,7 @@ def importCode(code, name, add_to_sys_modules=False,seqInd=None):
 # The reason for the seqInd here is that it needs to be available for the
 # exec in the module to work. seqInd thus unfortunately can't be added
 # afterwards.
+  import new
   module = new.module(name.encode('ascii', 'ignore'))
   if add_to_sys_modules:
     import sys
@@ -97,11 +97,11 @@ def uniq(seq):
   return [ x for x in seq if str(x) not in seen and not seen_add(str(x))]
 
 def reloadMods(modNames,target=None):
-  oldPath=sys.path
+  oldPath=list(sys.path)
   try:
     # Provide the configured pythonPath in case some of the reloaded
     # modules are located there.
-    sys.path+=config.pythonPath
+    sys.path=config.pythonPath+sys.path
     for m in modNames:
       if m in sys.modules:
         del sys.modules[m]

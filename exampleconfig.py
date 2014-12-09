@@ -86,6 +86,9 @@ supportDir='support'
 # Paths to append to the PYTHONPATH environment variable on execution of jobs.
 pythonPath=['./']
 
+# Libraries to load via LD_PRELOAD
+ldPreload=[]
+
 # Description of job types with support files and input parameter fields
 jobTypes='jobtypes.xml'
 

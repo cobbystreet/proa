@@ -99,7 +99,7 @@ parser.add_argument('-L','--longoutput',action='store_true',help='Provide the fu
 parser.add_argument('--fireaway',action='store_true',help='Show no live output of the job. Start and log out.')
 parser.add_argument('--nogitrev',action='store_true',help='Do not try to obtain git revision for the binary')
 parser.add_argument('--libpath',help='Paths to add to LD_LIBRARY_PATH')
-parser.add_argument('--preload',help='Libraries to load via LD_PRELOAD')
+parser.add_argument('--preload',nargs='+',help='Libraries to load via LD_PRELOAD')
 parser.add_argument('--precommand',help='Additional command to run in the job directory before the job command')
 parser.add_argument('--trace',help='Provide a trace library. You almost certainly don\'t want that!!')
 group = parser.add_mutually_exclusive_group()
@@ -116,6 +116,12 @@ parser.add_argument('--seqflatdir',action='store_true',\
                       help='Do not create subdirectories for sequence runs')
 
 args=parser.parse_args()
+
+if hasattr(config,'ldPreload'):
+  if args.preload:
+    args.preload+=config.ldPreload
+  else:
+    args.preload=config.ldPreload
 
 cpFileList=[]
 
@@ -449,14 +455,27 @@ def execCmd(command,runpath,cmd,jobScript):
   return pid
 
 def watchJob(pid):
+  import select
+  import fcntl
+  import os
   global watchProc,killed
   # display output on screen, contracted to one line
   killed=False
   signal.signal(signal.SIGINT, sigINT_handler)
   watchProc=config.login[args.runnode]['watchJob'](pid)
   traceBack=None
+
+  # Make stdout of watchProc non-blocking
+  flags = fcntl.fcntl(watchProc.stdout.fileno(), fcntl.F_GETFL)
+  fcntl.fcntl(watchProc.stdout.fileno(), fcntl.F_SETFL, flags | os.O_NONBLOCK)
+
   while 1:
-    output=watchProc.stdout.readline()
+    try:
+      readlist=select.select([watchProc.stdout],[],[])[0]
+    except select.error:
+      break
+    output=watchProc.stdout.read(1)
+#    output=os.read(watchProc.stdout.fileno(),1024)
     if traceBack!=None:
       traceBack+=output
     if output=="Traceback (most recent call last):\n":
@@ -514,7 +533,7 @@ else:
   if args.libpath:
     command+='export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:'+args.libpath+'\n'
   if args.preload:
-    command+='export LD_PRELOAD='+args.preload+'\n'
+    command+='export LD_PRELOAD='+':'.join(args.preload)+'\n'
   if args.precommand:
     command+=args.precommand+'\n'
   if args.trace:

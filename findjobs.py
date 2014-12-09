@@ -262,13 +262,26 @@ def gimmeAll(dir=None,checksize=False,jobTypes=None,node=None):
             if (not (f[0] in filedata.keys())):
               filedata[f[0]]=float('NaN')
       elif jobType.attrib['inputtype']=='python':
+        oldPath=list(sys.path)
+        oldMods=list(sys.modules)
         try:
+          # Provide an environment as close as to execution as possible.
+          sys.path=config.pythonPath+sys.path
+          os.chdir(path)
           params=jobhelper.getInput(curset['meta']['input'],path,curset['meta'].get('seqind',None))
           for k in jobType.findall("variable"):
             name=k.attrib['name']
             filedata[name]=getattr(params,name,'nan')
-        except SyntaxError:
+        except Exception:
+          print >>sys.stderr,'E',
           pass
+        finally:
+          sys.path[:]=oldPath # Restore
+          # Clean up the module list. Remove anything that might have been loaded
+          # while completing the request
+          newMods=[mod for mod in sys.modules if not (mod in oldMods)]
+          for mod in newMods:
+            del sys.modules[mod]
     else:
       filedata=curset['params']
       filesets=curset['psets']
@@ -450,7 +463,7 @@ def selectJobs(allJobs,selection=0,specialDir=None,lim=20):
       pass
     try:
       print >>sys.stderr,len(allJobs)-1-ind,fd['meta']['node']+':'+fd['meta']['dir']\
-        ,fd['meta']['time'],[(a,fd['params'][a]) for a in ukeys],
+        ,fd['meta']['time'],[(a,fd['params'][a]) for a in ukeys],fd['meta']['desc'],
     except (IndexError,KeyError):
       pass
     if (fd['meta'] in metas):
@@ -475,24 +488,20 @@ def getCommon(allJobs,ukeys):
 
 
 def testfile(dir,name,time=0,redoCommand=None):
-  return \
-    # the directory is a valid run directory
-  (isfile(pJoin(dir,"output")) \
-    # the file does not exist
-  and (((not isfile(pJoin(dir,name))) \
-        # it is older than output
-        or (getmtime(pJoin(dir,name))<getmtime(pJoin(dir,"output"))))\
-       # the file is younger than "time"
-       or ((time!=0) and (getmtime(pJoin(dir,name))<time))
-       # has dependencies and
-       or ((redoCommand!=None) and (redoCommand[2]!=None) \
-           # at least one of them is younger
-           and array([isfile(pJoin(dir,dep))\
-                      and (getmtime(pJoin(dir,dep))>getmtime(pJoin(dir,name)))\
-                    for dep in redoCommand[2].split(',')]).any())))
-           
+  return (\
+          # the file does not exist
+          (not isfile(pJoin(dir,name))) \
+           # the file is younger than "time"
+          or   ((time!=0) and (getmtime(pJoin(dir,name))>time))
+          # has dependencies and
+          or ((redoCommand!=None) and (redoCommand[2]!=None) \
+              # at least one of them is younger
+              and np.array([isfile(pJoin(dir,dep))\
+                            and (getmtime(pJoin(dir,dep))>getmtime(pJoin(dir,name)))\
+                            for dep in redoCommand[2].split(',')]).any()))
+
 def openFile(dir,name,accept=[""],ommit=[],fielddrop=[],fieldsplit=' +',\
-             redo=False,addparam="",forceReDo=False,redoCommand=None):
+             redo=False,addparam="",forceRedo=False,redoCommand=None,forceReload=False):
   """
   Load a dataset from a file.
 
@@ -581,7 +590,7 @@ def openFile(dir,name,accept=[""],ommit=[],fielddrop=[],fieldsplit=' +',\
   if not running:
     return np.ndarray(0)
 
-  if (forceReDo or redo) and (redoCommand==None):
+  if (forceRedo or redo) and (redoCommand==None):
     jobTypes=jobhelper.loadJobTypes()
 
     jobType=jobTypes.find('command[@name="{}"]'.format(name))
@@ -589,7 +598,7 @@ def openFile(dir,name,accept=[""],ommit=[],fielddrop=[],fieldsplit=' +',\
       redoCommand=[jobType.text,jobType.attrib["out"],jobType.attrib.get("depend",None)]
     else:
       redo=False
-      forceReDo=False
+      forceRedo=False
 
   if useServer:
     try:
@@ -606,7 +615,7 @@ def openFile(dir,name,accept=[""],ommit=[],fielddrop=[],fieldsplit=' +',\
     return dataserver.makeRequest\
       (config.login[dir['node']]['IP'],config.login[dir['node']]['port'],\
        ('o'\
-        ,(dir,name,accept,ommit,fielddrop,fieldsplit,redo,addparam,forceReDo,redoCommand)\
+        ,(dir,name,accept,ommit,fielddrop,fieldsplit,redo,addparam,forceRedo,redoCommand,forceReload)\
         ,config.varMods),meter)
 
   if isinstance(dir,dict):
@@ -616,8 +625,9 @@ def openFile(dir,name,accept=[""],ommit=[],fielddrop=[],fieldsplit=' +',\
   redone=False
 
   ident=str(dir)+str(name)+str(accept)+str(ommit)+str(fielddrop)+str(fieldsplit)
-  if ((forceReDo) or (redo and testfile(dir,name,redoCommand=redoCommand))):
+  if ((forceRedo) or (redo and testfile(dir,name,redoCommand=redoCommand))):
     if redoCommand!=None:
+      import subprocess
       cmd=redoCommand[0]+' '+addparam
       print >>sys.stderr,cmd
       # Redirect stderr to a pipe and capture so that a pythonic redirection of sys.stderr
@@ -630,10 +640,13 @@ def openFile(dir,name,accept=[""],ommit=[],fielddrop=[],fieldsplit=' +',\
       ident+=str(redoCommand)+addparam
     redone=True
 
-  if redone or (not (ident in [x[0] for x in cacheGplFiles]))\
-     or (testfile(dir,name,[x[2] for x in cacheGplFiles if x[0]==ident][0])):
+  cached=[x for x in cacheGplFiles if x[0]==ident]
+
+  if redone or (len(cached)==0) or (testfile(dir,name,cached[-1][2])) or forceReload:
     fullPath=pJoin(dir,name)
     myfile=open(fullPath,'r')
+    mtime=getmtime(fullPath)
+    print >>sys.stderr,'opening file "{}"'.format(fullPath),
     levelct=[0]*len(accept)
     lacre=[re.compile(a) for a in accept]
     lomre=[re.compile(a) for a in ommit]
@@ -651,6 +664,8 @@ def openFile(dir,name,accept=[""],ommit=[],fielddrop=[],fieldsplit=' +',\
     levelInd=[[] for i in accept]
     alldata=list()
     ins=myfile.readline()
+    totalAccept=np.zeros(len(accept))
+    totalOmmit=np.zeros(len(accept))
     while (ins != ""):
       if meter!=None:
         filepos+=len(ins) # +1 for the removed \n
@@ -659,24 +674,28 @@ def openFile(dir,name,accept=[""],ommit=[],fielddrop=[],fieldsplit=' +',\
         break
       ins=ins.rstrip("\n")
       for i in range(len(accept)):
-        if ((accept[i] == "") or (lacre[i].search(ins) != None))\
-           and ((i>=len(ommit)) or (ommit[i]=="") or (lomre[i].search(ins) == None)):
-          if i==0:
-            fields=[f for f in splitre.split(ins) if (f!='') and (not f in fielddrop)]
-            if (fieldlen<len(fields)):
-              fieldlen=len(fields)
-            alldata.append(fields)
+        if ((accept[i] == "") or (lacre[i].search(ins) != None)):
+          totalAccept[i]+=1
+          if ((i>=len(ommit)) or (ommit[i]=="") or (lomre[i].search(ins) == None)):
+            if i==0:
+              fields=[f for f in splitre.split(ins) if (f!='') and (not f in fielddrop)]
+              if (fieldlen<len(fields)):
+                fieldlen=len(fields)
+              alldata.append(fields)
+            else:
+              levelInd[i].append(levelct[i-1])
+              levelct[i-1]=0
+            levelct[i]+=1
           else:
-            levelInd[i].append(levelct[i-1])
-            levelct[i-1]=0
-          levelct[i]+=1
+            totalOmmit[i]+=1
+
       ins=myfile.readline()
       irn+=1
     myfile.close()
     if meter!=None:
       meter.reportProgress('last',1,filepos,'Done reading. Matrix aligning result')
 
-    # print 'alldata',levelInd,levelct
+    print >>sys.stderr,'alldata match',totalAccept,'ommit match',totalOmmit#,levelInd,levelct
 
     try:
       levelInd[0].append(fieldlen)
@@ -704,9 +723,13 @@ def openFile(dir,name,accept=[""],ommit=[],fielddrop=[],fieldsplit=' +',\
           aind[dimInd]+=1
           dimInd-=1
         adInd+=1
-      cacheGplFiles.append((ident,result,getmtime(pJoin(dir,name))))
+      if len(cached)>0:
+        cached[-1][1]=result
+        cached[-1][2]=mtime
+      else:
+        cacheGplFiles.append([ident,result,mtime])
     except:
-      # traceback.print_exc(file=sys.stderr)
+#      traceback.print_exc(file=sys.stderr)
       adLen=len(alldata)
       try:
         levelct.reverse()
@@ -724,8 +747,8 @@ def openFile(dir,name,accept=[""],ommit=[],fielddrop=[],fieldsplit=' +',\
     if (len(cacheGplFiles)>500):
         cacheGplFiles.pop(0)
   else:
-      print >>sys.stderr,'.',
-      result=[x[1] for x in cacheGplFiles if x[0]==ident][0]
+    print >>sys.stderr,'c',
+    result=cached[-1][1]
   return result
 
 if __name__ == "__main__":

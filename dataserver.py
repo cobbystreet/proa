@@ -69,6 +69,7 @@ class requestThread(threading.Thread):
     global lastallfd,cacheGplFiles,outSocket
     self.resultStream=self.clientSock.makefile('wb',buffer_size)
     outSocket=self.resultStream
+    oldMods=list(sys.modules)
     try:
       if (len(self.request)>2) and (self.request[2]!=None):
         jobhelper.reloadMods(self.request[2],self)
@@ -94,6 +95,12 @@ class requestThread(threading.Thread):
       except IOError:
         outSocket=None
         print >>stderr,traceback.format_exc()
+    finally:
+      # Clean up the module list. Remove anything that might have been loaded
+      # while completing the request
+      newMods=[mod for mod in sys.modules if not (mod in oldMods)]
+      for mod in newMods:
+        sys.modules.remove(mod)
     try:
       self.resultStream.close()
     except socket.error:
